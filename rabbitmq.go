@@ -23,7 +23,7 @@ func (this *Rmq) Connect(url string, consumers []Consumer, exchanges []ExchangeO
 
 	this.Channel = ch
 
-	go this.registerConsumers(consumers)
+	this.registerConsumers(consumers)
 	this.registerExchanges(exchanges)
 }
 
@@ -76,8 +76,6 @@ func (this *Rmq) consume(opts ConsumeOptions, callback func(msg Any, delivery am
 	msgs, err := this.Channel.Consume(opts.queueName, opts.Consumer, opts.AutoAck, opts.Exclusive, opts.NoLocal, opts.NoWait, nil)
 	this.catchError(err, "failed to register a consumer")
 
-	var forever chan struct{}
-
 	go func() {
 		for d := range msgs {
 			var body Any
@@ -86,8 +84,6 @@ func (this *Rmq) consume(opts ConsumeOptions, callback func(msg Any, delivery am
 			callback(d.Body, d)
 		}
 	}()
-
-	<-forever
 }
 
 func (this *Rmq) registerExchanges(opts []ExchangeOptions) {
