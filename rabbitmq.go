@@ -12,7 +12,7 @@ type Rmq struct {
 	Channel    *amqp.Channel
 }
 
-func (this *Rmq) Connect(url string, consumers []Consumer, exchanges []ExchangeOptions) {
+func (this *Rmq) Connect(url string, exchanges []ExchangeOptions) *Rmq {
 
 	conn, err := amqp.Dial(url)
 	this.catchError(err, "Failed to connect to Rabbitmq")
@@ -22,9 +22,9 @@ func (this *Rmq) Connect(url string, consumers []Consumer, exchanges []ExchangeO
 	this.catchError(err, "Failed to open channel")
 
 	this.Channel = ch
-
-	this.registerConsumers(consumers)
 	this.registerExchanges(exchanges)
+
+	return this
 }
 
 func (this *Rmq) CloseConnection() {
@@ -35,24 +35,19 @@ func (this *Rmq) CloseChannel() {
 	this.Channel.Close()
 }
 
-func (this *Rmq) registerConsumers(consumers []Consumer) {
-	if consumers == nil {
-		return
+func RegisterConsumer[T any](opts Consumer[T], connection *Rmq) {
+
+	defaults.SetDefaults(&opts)
+
+	if opts.CreateQueue {
+		connection.createQueue(opts.QueueOptions)
 	}
 
-	for _, consumer := range consumers {
-
-		defaults.SetDefaults(&consumer)
-
-		if consumer.CreateQueue {
-			this.createQueue(consumer.QueueOptions)
-		}
-
-		if consumer.BindingOptions.RoutingKey != "__NO_BIND__" && consumer.BindingOptions.Exchange != "__NO_BIND__" {
-			this.Channel.QueueBind(consumer.QueueOptions.QueueName, consumer.BindingOptions.RoutingKey, consumer.BindingOptions.Exchange, consumer.BindingOptions.NoWait, nil)
-		}
-		this.consume(consumer.ConsumerOptions, consumer.Consume)
+	if opts.BindingOptions.RoutingKey != "__NO_BIND__" && opts.BindingOptions.Exchange != "__NO_BIND__" {
+		connection.Channel.QueueBind(opts.QueueOptions.QueueName, opts.BindingOptions.RoutingKey, opts.BindingOptions.Exchange, opts.BindingOptions.NoWait, nil)
 	}
+
+	consume(connection, opts.ConsumerOptions, opts.Consume)
 }
 
 func (this *Rmq) catchError(err error, msg string) {
@@ -70,20 +65,21 @@ func (this *Rmq) createQueue(opts QueueOptions) (amqp.Queue, error) {
 	return msgs, err
 }
 
-func (this *Rmq) consume(opts ConsumeOptions, callback func(msg Any, delivery amqp.Delivery)) {
+func consume[T any](connection *Rmq, opts ConsumeOptions, callback func(msg T, delivery amqp.Delivery)) {
 	defaults.SetDefaults(&opts)
 
-	msgs, err := this.Channel.Consume(opts.queueName, opts.Consumer, opts.AutoAck, opts.Exclusive, opts.NoLocal, opts.NoWait, nil)
-	this.catchError(err, "failed to register a consumer")
+	msgs, err := connection.Channel.Consume(opts.queueName, opts.Consumer, opts.AutoAck, opts.Exclusive, opts.NoLocal, opts.NoWait, nil)
+	connection.catchError(err, "failed to register a consumer")
 
 	go func() {
 		for d := range msgs {
-			var body Any
+			var body T
 
 			json.Unmarshal(d.Body, &body)
-			callback(d.Body, d)
+			callback(body, d)
 		}
 	}()
+
 }
 
 func (this *Rmq) registerExchanges(opts []ExchangeOptions) {
